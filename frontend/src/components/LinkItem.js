@@ -20,16 +20,34 @@ const LinkItem = ({ link, onDelete, onEdit }) => {
   return (
     <li className="py-4">
       <div className="flex flex-col sm:flex-row sm:justify-between">
-        <div className="mb-2 sm:mb-0">
-          <a 
-            href={link.url} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="text-lg font-medium text-blue-600 hover:text-blue-800"
-          >
-            {link.title}
-          </a>
+        <div className="mb-2 sm:mb-0 flex-1">
+          <div className="flex items-center mb-1">
+            {link.favicon_url && (
+              <img
+                src={link.favicon_url}
+                alt="Site favicon"
+                className="w-4 h-4 mr-2 flex-shrink-0"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            )}
+            <a 
+              href={link.url} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-lg font-medium text-blue-600 hover:text-blue-800 truncate"
+            >
+              {link.title}
+            </a>
+            {link.auto_populated && (
+              <span className="ml-2 bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded flex-shrink-0">
+                auto
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-500">{getDomain(link.url)}</p>
+          {link.description && (
+            <p className="mt-1 text-sm text-gray-600 line-clamp-2">{link.description}</p>
+          )}
         </div>
         <div className="flex items-center space-x-2">
           <button

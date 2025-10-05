@@ -21,6 +21,9 @@ function initializeDatabase() {
         url TEXT NOT NULL,
         title TEXT NOT NULL,
         notes TEXT,
+        description TEXT,
+        favicon_url TEXT,
+        auto_populated BOOLEAN DEFAULT 0,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL
       )
@@ -42,6 +45,22 @@ function initializeDatabase() {
         PRIMARY KEY (link_id, tag_id),
         FOREIGN KEY (link_id) REFERENCES links (id) ON DELETE CASCADE,
         FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
+      )
+    `);
+
+    // Create link_metadata table for storing detailed metadata
+    db.run(`
+      CREATE TABLE IF NOT EXISTS link_metadata (
+        id TEXT PRIMARY KEY,
+        link_id TEXT UNIQUE,
+        original_title TEXT,
+        extracted_description TEXT,
+        favicon_url TEXT,
+        og_image_url TEXT,
+        extraction_metadata TEXT,
+        fetched_at TEXT NOT NULL,
+        user_modified BOOLEAN DEFAULT 0,
+        FOREIGN KEY (link_id) REFERENCES links (id) ON DELETE CASCADE
       )
     `);
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { db } = require('../database');
+const metadataService = require('../services/metadataService');
 
 const router = express.Router();
 
@@ -90,6 +91,45 @@ const removeTagsFromLink = (linkId) => {
   });
 };
 
+// GET /links/metadata - Fetch metadata for a URL without saving
+router.get('/metadata', async (req, res) => {
+  const { url } = req.query;
+  
+  // Validate required parameter
+  if (!url) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'URL parameter is required',
+      metadata: null
+    });
+  }
+  
+  try {
+    // Use metadata service to fetch metadata
+    const result = await metadataService.fetchMetadata(url);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        metadata: result.metadata,
+        error: null
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error,
+        metadata: null
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error while fetching metadata',
+      metadata: null
+    });
+  }
+});
+
 // GET /links - Retrieve all links with optional filtering
 router.get('/', (req, res) => {
   const { tag, search, limit = 20, offset = 0, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
@@ -167,12 +207,60 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /links - Create a new link
-router.post('/', (req, res) => {
-  const { url, title, tags, notes } = req.body;
+router.post('/', async (req, res) => {
+  const { url, title, tags, notes, fetchMetadata = false } = req.body;
   
   // Validate required fields
-  if (!url || !title) {
-    return res.status(400).json({ error: 'URL and title are required' });
+  if (!url) {
+    return res.status(400).json({ error: 'URL is required' });
+  }
+  
+  let linkTitle = title;
+  let linkNotes = notes || '';
+  let linkDescription = null;
+  let faviconUrl = null;
+  let autoPopulated = false;
+  let suggestedTags = tags || [];
+  
+  // Fetch metadata if requested and title is not provided
+  if (fetchMetadata) {
+    try {
+      const metadataResult = await metadataService.fetchMetadata(url);
+      
+      if (metadataResult.success && metadataResult.metadata) {
+        const metadata = metadataResult.metadata;
+        
+        // Use extracted title if not provided
+        if (!linkTitle && metadata.title) {
+          linkTitle = metadata.title;
+          autoPopulated = true;
+        }
+        
+        // Use extracted description
+        if (metadata.description) {
+          linkDescription = metadata.description;
+        }
+        
+        // Use extracted favicon
+        if (metadata.favicon) {
+          faviconUrl = metadata.favicon;
+        }
+        
+        // Merge suggested tags with provided tags
+        if (metadata.suggestedTags && metadata.suggestedTags.length > 0) {
+          const combinedTags = [...new Set([...suggestedTags, ...metadata.suggestedTags])];
+          suggestedTags = combinedTags;
+        }
+      }
+    } catch (error) {
+      // Log error but continue with link creation
+      console.warn('Failed to fetch metadata for URL:', url, error.message);
+    }
+  }
+  
+  // Validate that we have a title (either provided or extracted)
+  if (!linkTitle) {
+    return res.status(400).json({ error: 'Title is required (provide title or enable fetchMetadata)' });
   }
   
   const id = uuidv4();
@@ -180,8 +268,8 @@ router.post('/', (req, res) => {
   const createdAt = req.body.createdAt || now;
   
   db.run(
-    'INSERT INTO links (id, url, title, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, url, title, notes || '', createdAt, now],
+    'INSERT INTO links (id, url, title, notes, description, favicon_url, auto_populated, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, url, linkTitle, linkNotes, linkDescription, faviconUrl, autoPopulated, createdAt, now],
     async (err) => {
       if (err) {
         return res.status(500).json({ error: err.message });
@@ -189,16 +277,19 @@ router.post('/', (req, res) => {
       
       try {
         // Add tags if provided
-        if (tags && tags.length > 0) {
-          await addTagsToLink(id, tags);
+        if (suggestedTags && suggestedTags.length > 0) {
+          await addTagsToLink(id, suggestedTags);
         }
         
         res.status(201).json({
           id,
           url,
-          title,
-          notes: notes || '',
-          tags: tags || [],
+          title: linkTitle,
+          notes: linkNotes,
+          description: linkDescription,
+          favicon_url: faviconUrl,
+          auto_populated: autoPopulated,
+          tags: suggestedTags || [],
           createdAt,
           updatedAt: now
         });
@@ -212,7 +303,7 @@ router.post('/', (req, res) => {
 // PATCH /links/:id - Update a link
 router.patch('/:id', (req, res) => {
   const { id } = req.params;
-  const { title, notes, tags } = req.body;
+  const { title, notes, description, tags } = req.body;
   const now = new Date().toISOString();
   
   // Check if link exists
@@ -227,7 +318,7 @@ router.patch('/:id', (req, res) => {
     
     try {
       // Update link details if provided
-      if (title || notes !== undefined) {
+      if (title || notes !== undefined || description !== undefined) {
         const updates = [];
         const params = [];
         
@@ -239,6 +330,11 @@ router.patch('/:id', (req, res) => {
         if (notes !== undefined) {
           updates.push('notes = ?');
           params.push(notes);
+        }
+        
+        if (description !== undefined) {
+          updates.push('description = ?');
+          params.push(description);
         }
         
         updates.push('updatedAt = ?');
